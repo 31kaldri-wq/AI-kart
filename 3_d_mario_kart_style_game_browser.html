@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Kart Game</title>
+  <style>
+    body { margin: 0; overflow: hidden; background:#000; color:white; font-family:sans-serif; }
+    canvas { display: block; }
+    #ui { position:absolute; top:10px; left:10px; font-size:20px; }
+    #startBtn { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:15px 25px; font-size:20px; cursor:pointer; }
+  </style>
+</head>
+<body>
+<div id="ui">Lap: 1 / 3 | Pos: 1st</div>
+<button id="startBtn">START GAME</button>
+
+<audio id="music" loop>
+  <source src="https://cdn.pixabay.com/audio/2022/03/15/audio_6c6e0c9f1c.mp3" type="audio/mpeg">
+</audio>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<script>
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const ui = document.getElementById("ui");
+const music = document.getElementById("music");
+const startBtn = document.getElementById("startBtn");
+
+startBtn.onclick = () => { music.play(); startBtn.style.display='none'; };
+
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5,10,7);
+scene.add(light);
+
+// TRACK
+const track = new THREE.Mesh(
+  new THREE.RingGeometry(20, 40, 64),
+  new THREE.MeshLambertMaterial({color:0x333333, side:THREE.DoubleSide})
+);
+track.rotation.x = -Math.PI/2;
+scene.add(track);
+
+// STRONGER BARRIERS (continuous walls)
+const barrierMaterial = new THREE.MeshLambertMaterial({color:0xff0000});
+for(let i=0;i<80;i++){
+  const a = (i/80)*Math.PI*2;
+
+  const outer = new THREE.Mesh(new THREE.BoxGeometry(2,3,1), barrierMaterial);
+  outer.position.set(Math.sin(a)*42,1.5,Math.cos(a)*42);
+  scene.add(outer);
+
+  const inner = new THREE.Mesh(new THREE.BoxGeometry(2,3,1), barrierMaterial);
+  inner.position.set(Math.sin(a)*18,1.5,Math.cos(a)*18);
+  scene.add(inner);
+}
+
+// BOOST PADS 🔥
+const boostPads = [];
+for(let i=0;i<6;i++){
+  const a = (i/6)*Math.PI*2;
+  const pad = new THREE.Mesh(
+    new THREE.BoxGeometry(3,0.2,3),
+    new THREE.MeshBasicMaterial({color:0x00ffff})
+  );
+  pad.position.set(Math.sin(a)*30,0.1,Math.cos(a)*30);
+  scene.add(pad);
+  boostPads.push(pad);
+}
+
+// RAMPS (JUMPS)
+const ramps = [];
+for(let i=0;i<4;i++){
+  const a = (i/4)*Math.PI*2;
+  const ramp = new THREE.Mesh(
+    new THREE.BoxGeometry(4,1,6),
+    new THREE.MeshLambertMaterial({color:0xffff00})
+  );
+  ramp.position.set(Math.sin(a)*30,0.5,Math.cos(a)*30);
+  ramp.rotation.y = -a;
+  ramp.rotation.x = -0.3;
+  scene.add(ramp);
+  ramps.push(ramp);
+}
+
+// GRASS
+const grass = new THREE.Mesh(
+  new THREE.PlaneGeometry(200,200),
+  new THREE.MeshLambertMaterial({color:0x228B22})
+);
+grass.rotation.x = -Math.PI/2;
+scene.add(grass);
+
+// PLAYER
+const kart = new THREE.Mesh(
+  new THREE.BoxGeometry(1,0.5,2),
+  new THREE.MeshLambertMaterial({color:0xff0000})
+);
+kart.position.y = 0.25;
+scene.add(kart);
+
+// AI
+const aiKarts = [];
+for(let i=0;i<3;i++){
+  const ai = new THREE.Mesh(
+    new THREE.BoxGeometry(1,0.5,2),
+    new THREE.MeshLambertMaterial({color:Math.random()*0xffffff})
+  );
+  ai.userData.angle = Math.random()*Math.PI*2;
+  ai.userData.speed = 0.22 + Math.random()*0.05;
+  ai.userData.targetRadius = 28 + Math.random()*4;
+  scene.add(ai);
+  aiKarts.push(ai);
+}
+
+camera.position.set(0,3,6);
+
+let speed = 0;
+let angle = 0;
+let drift = false;
+let driftPower = 0;
+
+// JUMP
+let yVel = 0;
+let onGround = true;
+let trickBoost = 0;
+
+let lap = 1;
+let lastZ = kart.position.z;
+
+const keys = {};
+document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+function getProgress(obj){ return Math.atan2(obj.position.x, obj.position.z); }
+
+function update(){
+  if(keys['w']) speed += 0.02;
+  if(keys['s']) speed -= 0.02;
+  speed *= 0.98;
+
+  drift = keys['shift'];
+  let turnSpeed = drift ? 0.06 : 0.03;
+
+  if(keys['a']) { angle += turnSpeed; if(drift) driftPower += 0.002; }
+  if(keys['d']) { angle -= turnSpeed; if(drift) driftPower += 0.002; }
+
+  if(!drift && driftPower > 0){ speed += driftPower * 2; driftPower = 0; }
+
+  // BOOST PAD
+  boostPads.forEach(p => {
+    if(kart.position.distanceTo(p.position) < 2){
+      speed += 0.1;
+    }
+  });
+
+  kart.rotation.y = angle;
+  kart.position.x += Math.sin(angle) * speed;
+  kart.position.z += Math.cos(angle) * speed;
+
+  // RAMP → JUMP
+  ramps.forEach(r => {
+    if(kart.position.distanceTo(r.position) < 3 && onGround){
+      yVel = 0.25;
+      onGround = false;
+    }
+  });
+
+  // TRICK BOOST (press space mid air)
+  if(!onGround && keys[' '] && trickBoost === 0){
+    trickBoost = 20;
+  }
+
+  if(trickBoost > 0){
+    speed += 0.05;
+    trickBoost--;
+  }
+
+  // GRAVITY
+  if(!onGround){
+    kart.position.y += yVel;
+    yVel -= 0.01;
+    if(kart.position.y <= 0.25){
+      kart.position.y = 0.25;
+      onGround = true;
+      if(trickBoost > 0) speed += 0.2; // landing boost
+    }
+  }
+
+  // BARRIER COLLISION
+  const dist = Math.sqrt(kart.position.x**2 + kart.position.z**2);
+  if(dist < 20 || dist > 40){ speed *= -0.6; }
+
+  // LAP
+  if(lastZ < 30 && kart.position.z >= 30 && Math.abs(kart.position.x) < 5){ lap++; }
+  lastZ = kart.position.z;
+
+  // AI
+  aiKarts.forEach(ai => {
+    ai.userData.angle += ai.userData.speed * 0.02;
+    let r = ai.userData.targetRadius;
+    ai.position.x = Math.sin(ai.userData.angle) * r;
+    ai.position.z = Math.cos(ai.userData.angle) * r;
+    ai.rotation.y = -ai.userData.angle;
+  });
+
+  // POSITION
+  let racers = [kart, ...aiKarts];
+  racers.sort((a,b)=> getProgress(b) - getProgress(a));
+  let position = racers.indexOf(kart) + 1;
+
+  ui.innerText = `Lap: ${Math.min(lap,3)} / 3 | Pos: ${position}${position==1?'st':position==2?'nd':position==3?'rd':'th'}`;
+
+  // CAMERA
+  camera.position.x = kart.position.x - Math.sin(angle)*6;
+  camera.position.z = kart.position.z - Math.cos(angle)*6;
+  camera.position.y = 3 + kart.position.y;
+  camera.lookAt(kart.position);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
